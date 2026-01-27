@@ -30,7 +30,7 @@
   - Structured error responses
   - Config loading at startup with validation
 
-  ### Project Structure Used
+  ## Project Structures Used So Far
   cmd/api/main.go           # Wiring only (~50 lines)
   internal/
   ├── config/config.go      # Config struct + Load()
@@ -39,7 +39,23 @@
   └── models/               # Data structures
 
   ## Current Focus: Project 2
-  [Update this section]
+
+  ### Learning Objectives:
+  Implement WebSocket connections and message broadcasting
+  Manage concurrent connections with goroutines
+  Use channels for message routing between goroutines
+  Implement Redis Pub/Sub for horizontal scaling
+  User presence detection (online/offline status)
+  Message persistence and history retrieval
+  Handle connection recovery and reconnection logic
+
+  ### Features to Implement:
+  One-on-one messaging
+  Group chats/rooms
+  Typing indicators
+  Message read receipts
+  Online user list
+  Message history with pagination
 
   ## Remaining Learning Goals
   - Goroutines and channels (not yet covered)
@@ -53,3 +69,6 @@
   - Explain the "why" behind Go idioms
   - Point out security issues and performance concerns
   - Challenge me to think through problems
+  - If needed, you can propose to generate simple Frontends for manually testing the components/final app
+  - Since we already covered Docker, we should start every project by laying the dockerization baseground 
+  - Depencies should be able to run in containers (DB, Redis, Queues) and the app to be run both locally and in a container
