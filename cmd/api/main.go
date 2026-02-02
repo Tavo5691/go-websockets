@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gochat/internal/config"
 	"gochat/internal/handlers"
+	"gochat/internal/hub"
 	"log"
 
 	"github.com/gin-gonic/gin"
@@ -12,8 +13,10 @@ import (
 func main() {
 	config := config.Load()
 	router := gin.Default()
-	handlers := handlers.New()
+	hub := hub.NewHub()
+	go hub.Run()
 
+	handlers := handlers.New(hub)
 	router.GET("/health", handlers.Health)
 	router.GET("/ws", handlers.WebSocket)
 	router.StaticFile("/", "./web/index.html")

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"gochat/internal/hub"
 	"log"
 	"net/http"
 
@@ -14,37 +15,16 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-/*func readerLoop(conn *websocket.Conn, ch chan []byte) {
-	for {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			conn.Close()
-			break
-		}
-
-		ch <- message
-	}
-}*/
-
 func (h *Handler) WebSocket(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	defer conn.Close()
 
-	for {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Println(err)
-			break
-		}
+	client := hub.NewClient(conn)
+	h.hub.Register <- client
 
-		if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			log.Println(err)
-			break
-		}
-	}
-
+	go client.ReadLoop(h.hub)
+	go client.WriteLoop()
 }
