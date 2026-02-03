@@ -5,6 +5,7 @@ import (
 	"gochat/internal/config"
 	"gochat/internal/handlers"
 	"gochat/internal/hub"
+	"gochat/internal/middleware"
 	"log"
 
 	"github.com/gin-gonic/gin"
@@ -12,14 +13,19 @@ import (
 
 func main() {
 	config := config.Load()
-	router := gin.Default()
 	hub := hub.NewHub()
 	go hub.Run()
 
-	handlers := handlers.New(hub)
+	router := gin.Default()
+	protected := router.Group("/")
+	protected.Use(middleware.Auth(config.JwtKey))
+
+	handlers := handlers.New(hub, config.JwtKey)
 	router.GET("/health", handlers.Health)
-	router.GET("/ws", handlers.WebSocket)
+	router.POST("/dev/token", handlers.DevToken)
 	router.StaticFile("/", "./web/index.html")
+
+	protected.GET("/ws", handlers.WebSocket)
 
 	if config.Port != "" {
 		log.Fatal(router.Run(fmt.Sprintf(":%v", config.Port)))

@@ -1,12 +1,19 @@
 package hub
 
 import (
+	"encoding/json"
+	"gochat/internal/models"
+	"log"
+	"time"
+
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
 type Client struct {
-	conn *websocket.Conn
-	send chan []byte
+	conn   *websocket.Conn
+	userId uuid.UUID
+	send   chan *models.Message
 }
 
 func (c *Client) ReadLoop(h *Hub) {
@@ -16,12 +23,21 @@ func (c *Client) ReadLoop(h *Hub) {
 	}()
 
 	for {
-		_, message, err := c.conn.ReadMessage()
+		_, payload, err := c.conn.ReadMessage()
 		if err != nil {
 			break
 		}
 
-		h.broadcast <- message
+		message := new(models.Message)
+		if err := json.Unmarshal(payload, message); err != nil {
+			log.Println("invalid message format:", err)
+			continue
+		}
+
+		message.From = c.userId
+		message.Timestamp = time.Now()
+
+		h.direct <- message
 	}
 }
 
@@ -29,30 +45,35 @@ func (c *Client) WriteLoop() {
 	defer c.conn.Close()
 
 	for message := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+		data, err := json.Marshal(message)
+		if err != nil {
+			// handle error
 			break
 		}
+		c.conn.WriteMessage(websocket.TextMessage, data)
 	}
 }
 
 type Hub struct {
-	clients    map[*Client]bool // poor man's Set, we ensure uniqueness of clients
+	clients    map[uuid.UUID]*Client
 	Register   chan *Client
 	unregister chan *Client
-	broadcast  chan []byte
+	direct     chan *models.Message
 }
 
 func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.Register:
-			h.clients[client] = true
+			h.clients[client.userId] = client
 		case client := <-h.unregister:
-			delete(h.clients, client)
+			delete(h.clients, client.userId)
 			close(client.send)
-		case message := <-h.broadcast:
-			for client := range h.clients {
+		case message := <-h.direct:
+			if client, ok := h.clients[message.To]; ok {
 				client.send <- message
+			} else {
+				log.Println("user offline")
 			}
 		}
 	}
@@ -60,16 +81,17 @@ func (h *Hub) Run() {
 
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
+		clients:    make(map[uuid.UUID]*Client),
 		Register:   make(chan *Client),
 		unregister: make(chan *Client),
-		broadcast:  make(chan []byte),
+		direct:     make(chan *models.Message),
 	}
 }
 
-func NewClient(c *websocket.Conn) *Client {
+func NewClient(c *websocket.Conn, u uuid.UUID) *Client {
 	return &Client{
-		conn: c,
-		send: make(chan []byte, 5),
+		conn:   c,
+		userId: u,
+		send:   make(chan *models.Message, 5),
 	}
 }
