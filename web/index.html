@@ -5,18 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebSocket Chat Test</title>
     <style>
-        body { font-family: monospace; max-width: 700px; margin: 50px auto; padding: 20px; }
-        #messages { border: 1px solid #ccc; height: 250px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
+        body { font-family: monospace; max-width: 750px; margin: 50px auto; padding: 20px; }
+        #messages { border: 1px solid #ccc; height: 200px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
         .sent { color: blue; }
         .received { color: green; }
         .error { color: red; }
         .system { color: gray; }
+        .room-msg { color: purple; }
         input, select { padding: 8px; margin: 2px; }
-        input[type="text"] { width: 300px; }
+        input[type="text"] { width: 280px; }
         button { padding: 8px 16px; margin: 2px; cursor: pointer; }
-        .section { margin-bottom: 20px; padding: 10px; border: 1px solid #eee; }
-        .section h3 { margin-top: 0; }
-        .user-info { background: #f5f5f5; padding: 10px; margin-bottom: 10px; }
+        .section { margin-bottom: 15px; padding: 10px; border: 1px solid #eee; }
+        .section h3 { margin-top: 0; margin-bottom: 10px; }
+        .user-info { background: #f5f5f5; padding: 10px; margin-bottom: 10px; font-size: 12px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 10px; }
+        .tab { padding: 8px 16px; cursor: pointer; border: 1px solid #ccc; background: #f5f5f5; }
+        .tab.active { background: #007bff; color: white; border-color: #007bff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .room-list { font-size: 12px; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -28,7 +35,7 @@
         <button onclick="getToken()">Generate Token</button>
         <div class="user-info" id="tokenInfo" style="display:none">
             <strong>User ID:</strong> <span id="currentUserId"></span><br>
-            <strong>Token:</strong> <span id="currentToken" style="word-break: break-all; font-size: 11px;"></span>
+            <strong>Token:</strong> <span id="currentToken" style="word-break: break-all;"></span>
         </div>
     </div>
 
@@ -40,11 +47,38 @@
     </div>
 
     <div class="section">
-        <h3>3. Send Message</h3>
-        <input type="text" id="recipientId" placeholder="Recipient User ID">
-        <br>
-        <input type="text" id="messageInput" placeholder="Message..." onkeypress="if(event.key==='Enter')send()">
-        <button onclick="send()">Send</button>
+        <h3>3. Rooms</h3>
+        <input type="text" id="roomId" placeholder="Room ID">
+        <button onclick="joinRoom()">Join Room</button>
+        <button onclick="leaveRoom()">Leave Room</button>
+        <button onclick="generateRoomId()">Generate ID</button>
+        <div class="room-list">
+            <strong>Joined rooms:</strong> <span id="joinedRooms">none</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>4. Send Message</h3>
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('dm')">Direct Message</div>
+            <div class="tab" onclick="switchTab('room')">Room Message</div>
+        </div>
+
+        <div id="dm-tab" class="tab-content active">
+            <input type="text" id="recipientId" placeholder="Recipient User ID">
+            <br>
+            <input type="text" id="dmInput" placeholder="Message..." onkeypress="if(event.key==='Enter')sendDM()">
+            <button onclick="sendDM()">Send DM</button>
+        </div>
+
+        <div id="room-tab" class="tab-content">
+            <select id="roomSelect">
+                <option value="">Select a room...</option>
+            </select>
+            <br>
+            <input type="text" id="roomMsgInput" placeholder="Message..." onkeypress="if(event.key==='Enter')sendRoomMsg()">
+            <button onclick="sendRoomMsg()">Send to Room</button>
+        </div>
     </div>
 
     <h3>Messages</h3>
@@ -54,6 +88,7 @@
         let ws = null;
         let token = null;
         let userId = null;
+        let joinedRooms = new Set();
 
         const messages = document.getElementById('messages');
 
@@ -63,6 +98,38 @@
             div.className = className;
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+            if (tab === 'dm') {
+                document.querySelector('.tab:nth-child(1)').classList.add('active');
+                document.getElementById('dm-tab').classList.add('active');
+            } else {
+                document.querySelector('.tab:nth-child(2)').classList.add('active');
+                document.getElementById('room-tab').classList.add('active');
+            }
+        }
+
+        function updateRoomList() {
+            const list = joinedRooms.size > 0 ? Array.from(joinedRooms).join(', ') : 'none';
+            document.getElementById('joinedRooms').textContent = list;
+
+            const select = document.getElementById('roomSelect');
+            select.innerHTML = '<option value="">Select a room...</option>';
+            joinedRooms.forEach(room => {
+                const option = document.createElement('option');
+                option.value = room;
+                option.textContent = room.substring(0, 8) + '...';
+                select.appendChild(option);
+            });
+        }
+
+        function generateRoomId() {
+            const id = crypto.randomUUID();
+            document.getElementById('roomId').value = id;
         }
 
         async function getToken() {
@@ -110,7 +177,12 @@
             ws.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data);
-                    log(`From ${msg.from}: ${msg.content}`, 'received');
+                    if (msg.type === 'room') {
+                        const roomShort = msg.room.substring(0, 8);
+                        log(`[Room ${roomShort}...] ${msg.from.substring(0, 8)}...: ${msg.content}`, 'room-msg');
+                    } else {
+                        log(`DM from ${msg.from.substring(0, 8)}...: ${msg.content}`, 'received');
+                    }
                 } catch {
                     log(`Received: ${event.data}`, 'received');
                 }
@@ -120,6 +192,8 @@
                 document.getElementById('status').textContent = 'Disconnected';
                 log('Disconnected', 'system');
                 ws = null;
+                joinedRooms.clear();
+                updateRoomList();
             };
 
             ws.onerror = (error) => {
@@ -133,14 +207,50 @@
             }
         }
 
-        function send() {
+        function joinRoom() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+
+            const roomId = document.getElementById('roomId').value.trim();
+            if (!roomId) {
+                log('Enter a room ID', 'error');
+                return;
+            }
+
+            ws.send(JSON.stringify({ type: 'join', room: roomId }));
+            joinedRooms.add(roomId);
+            updateRoomList();
+            log(`Joined room: ${roomId.substring(0, 8)}...`, 'system');
+        }
+
+        function leaveRoom() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+
+            const roomId = document.getElementById('roomId').value.trim();
+            if (!roomId) {
+                log('Enter a room ID', 'error');
+                return;
+            }
+
+            ws.send(JSON.stringify({ type: 'leave', room: roomId }));
+            joinedRooms.delete(roomId);
+            updateRoomList();
+            log(`Left room: ${roomId.substring(0, 8)}...`, 'system');
+        }
+
+        function sendDM() {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 log('Not connected', 'error');
                 return;
             }
 
             const recipient = document.getElementById('recipientId').value.trim();
-            const content = document.getElementById('messageInput').value.trim();
+            const content = document.getElementById('dmInput').value.trim();
 
             if (!recipient) {
                 log('Enter recipient User ID', 'error');
@@ -152,10 +262,33 @@
                 return;
             }
 
-            const msg = { to: recipient, content: content };
-            ws.send(JSON.stringify(msg));
-            log(`To ${recipient}: ${content}`, 'sent');
-            document.getElementById('messageInput').value = '';
+            ws.send(JSON.stringify({ type: 'dm', to: recipient, content: content }));
+            log(`DM to ${recipient.substring(0, 8)}...: ${content}`, 'sent');
+            document.getElementById('dmInput').value = '';
+        }
+
+        function sendRoomMsg() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected', 'error');
+                return;
+            }
+
+            const roomId = document.getElementById('roomSelect').value;
+            const content = document.getElementById('roomMsgInput').value.trim();
+
+            if (!roomId) {
+                log('Select a room', 'error');
+                return;
+            }
+
+            if (!content) {
+                log('Enter a message', 'error');
+                return;
+            }
+
+            ws.send(JSON.stringify({ type: 'room', room: roomId, content: content }));
+            log(`Sent to room ${roomId.substring(0, 8)}...: ${content}`, 'sent');
+            document.getElementById('roomMsgInput').value = '';
         }
     </script>
 </body>

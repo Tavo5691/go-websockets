@@ -56,6 +56,7 @@ func (c *Client) WriteLoop() {
 
 type Hub struct {
 	clients    map[uuid.UUID]*Client
+	rooms      map[uuid.UUID]*Room
 	Register   chan *Client
 	unregister chan *Client
 	direct     chan *models.Message
@@ -67,14 +68,55 @@ func (h *Hub) Run() {
 		case client := <-h.Register:
 			h.clients[client.userId] = client
 		case client := <-h.unregister:
+			for _, room := range h.rooms {
+				delete(room.members, client)
+			}
 			delete(h.clients, client.userId)
 			close(client.send)
 		case message := <-h.direct:
-			if client, ok := h.clients[message.To]; ok {
-				client.send <- message
-			} else {
-				log.Println("user offline")
+			switch message.Type {
+			case models.DM:
+				if client, exist := h.clients[message.To]; exist {
+					client.send <- message
+				} else {
+					log.Println("user offline")
+				}
+			case models.Join:
+				room, exist := h.rooms[message.Room]
+				if !exist {
+					room = NewRoom(message.Room)
+					h.rooms[message.Room] = room
+				}
+
+				if client, exist := h.clients[message.From]; exist {
+					room.members[client] = true
+				} else {
+					log.Println("user offline")
+				}
+			case models.Leave:
+				room, exist := h.rooms[message.Room]
+				if !exist {
+					log.Println("invalid room")
+					break
+				}
+
+				if client, exist := h.clients[message.From]; exist {
+					delete(room.members, client)
+				} else {
+					log.Println("user offline")
+				}
+			case models.Room:
+				room, exist := h.rooms[message.Room]
+				if !exist {
+					log.Println("invalid room")
+					break
+				}
+
+				for member := range room.members {
+					member.send <- message
+				}
 			}
+
 		}
 	}
 }
@@ -82,6 +124,7 @@ func (h *Hub) Run() {
 func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[uuid.UUID]*Client),
+		rooms:      make(map[uuid.UUID]*Room),
 		Register:   make(chan *Client),
 		unregister: make(chan *Client),
 		direct:     make(chan *models.Message),
